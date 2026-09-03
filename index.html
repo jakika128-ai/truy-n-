@@ -1,0 +1,75 @@
+const express = require('express');
+const cors = require('cors');
+const jwt = require('jsonwebtoken');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const JWT_SECRET = 'super_secret_key_123';
+
+// Giả lập Database
+const users = {
+  'user_1': { id: 'user_1', name: 'Reader 01', coins: 15, unlockedEpisodes: [] }
+};
+
+const episodes = {
+  'ep-1': { id: 'ep-1', title: 'Chương 1: Mở đầu', coinCost: 0, pages: ['https://placehold.co/600x1200/png?text=Page+1', 'https://placehold.co/600x1200/png?text=Page+2'] },
+  'ep-2': { id: 'ep-2', title: 'Chương 2: Cuộc gặp gỡ', coinCost: 5, pages: ['https://placehold.co/600x1200/png?text=Page+3', 'https://placehold.co/600x1200/png?text=Page+4'] }
+};
+
+// Middleware xác thực JWT
+const authenticate = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Chưa đăng nhập' });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(403).json({ error: 'Token không hợp lệ' });
+  }
+};
+
+// API: Đăng nhập giả lập lấy Token
+app.post('/api/login', (req, res) => {
+  const token = jwt.sign({ userId: 'user_1' }, JWT_SECRET);
+  res.json({ token, user: users['user_1'] });
+});
+
+// API: Mua chương truyện
+app.post('/api/episodes/unlock', authenticate, (req, res) => {
+  const { episodeId } = req.body;
+  const user = users[req.user.userId];
+  const episode = episodes[episodeId];
+
+  if (!episode) return res.status(404).json({ error: 'Không tìm thấy chương' });
+  if (user.unlockedEpisodes.includes(episodeId)) return res.json({ message: 'Đã mở khóa trước đó', coins: user.coins });
+  if (user.coins < episode.coinCost) return res.status(400).json({ error: 'Không đủ Xu' });
+
+  // Trừ xu & thêm vào danh sách đã mua
+  user.coins -= episode.coinCost;
+  user.unlockedEpisodes.push(episodeId);
+
+  res.json({ success: true, coins: user.coins, unlockedEpisodes: user.unlockedEpisodes });
+});
+
+// API: Lấy nội dung chương truyện (Reader)
+app.get('/api/episodes/:id', authenticate, (req, res) => {
+  const episodeId = req.params.id;
+  const user = users[req.user.userId];
+  const episode = episodes[episodeId];
+
+  if (!episode) return res.status(404).json({ error: 'Không tìm thấy chương' });
+
+  // Kiểm tra quyền xem
+  const isFree = episode.coinCost === 0;
+  const isUnlocked = user.unlockedEpisodes.includes(episodeId);
+
+  if (!isFree && !isUnlocked) {
+    return res.status(403).json({ error: 'Chương này bị khóa. Vui lòng dùng Xu để mở!', isLocked: true, cost: episode.coinCost });
+  }
+
+  res.json({ id: episode.id, title: episode.title, pages: episode.pages });
+});
+
+app.listen(5000, () => console.log('Backend đang chạy tại http://localhost:5000'));
